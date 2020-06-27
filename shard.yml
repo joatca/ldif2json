@@ -1,0 +1,13 @@
+name: ldif2json
+version: 0.1.0
+
+authors:
+  - Fraser McCrossane <fraser@mccrossan.ca>
+
+targets:
+  ldif2json:
+    main: src/ldif2json.cr
+
+crystal: 0.35.1
+
+license: MIT
