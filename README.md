@@ -20,10 +20,10 @@ By default `ldif2json` returns all attributes as arrays, even if only one value 
 * `--type=attribute:type` - force the given attribute to have the given type. Valid types are:
   * `auto` - use `number` if all values are numbers, otherwise `string`
   * `string` - always return strings
-  * `number` - always return numbers; if a value is not a valid number, return `0`
+  * `number` - always return numbers; if a value is not a valid number, return `0.0`
   * `number!` - always return numbers; if any value is not a number, exit with status 2
-  * `bool` - always return either `true` or `false`; if a value is the empty string or a number that evaluates to zero then `false` otherwise `true`
-  * `numbool` - return `true` for non-zero numerics, `false` for zero and exit status 2 for anything else
+  * `integer` - always return integers; if a value is not a valid integer, return `0`
+  * `integer!` - always return integers; if any value is not a integer, exit with status 2
 
 ## Contributing
 
