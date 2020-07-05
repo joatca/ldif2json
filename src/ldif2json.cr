@@ -15,7 +15,7 @@ module Ldif2json
   enum Type
     Auto
     String
-    Number
+    Number0
     NumberErr
   end
 
@@ -44,7 +44,7 @@ module Ldif2json
       @can_be_flattened = new_boolhash(false)
       
       OptionParser.new do |opts|
-        opts.banner = "Usage: #{PROGRAM_NAME} [options]\n\nValid TYPE values are:\nauto (coerce to integers if possible, otherwise floats, otherwise string)\nstring (always interpret as string)\nnumber (coerce to a number, 0 if invalid)\nnumber! (coerce to a number, error if any invalid)\n"
+        opts.banner = "Usage: #{PROGRAM_NAME} [options]\n\nValid TYPE values are:\nauto (coerce to integers if possible, otherwise floats, otherwise string)\nstring (always interpret as string)\nnumber0 (coerce to a number, 0 if invalid)\nnumber (coerce to a number, error if any invalid)\n"
 
         opts.on("-f", "--flatten", "flatten each attribute to a single element if no records are multi-value") do |v|
           raise NormalError.new("cannot specify both flatten and join") unless @mode == Mode::Normal
@@ -72,9 +72,9 @@ module Ldif2json
             when "string"
               @coercions[attrib] = Type::String
               @can_be_coerced[attrib] = false # no point trying to coerce
+            when "number0"
+              @coercions[attrib] = Type::Number0
             when "number"
-              @coercions[attrib] = Type::Number
-            when "number!"
               @coercions[attrib] = Type::NumberErr
             else
               raise NormalError.new("unrecognised coercion \"#{coercion}\"")
@@ -151,7 +151,7 @@ module Ldif2json
       
       if config.can_be_coerced[key]
         case config.coercions[key]
-        when Type::Number # coerce to a number or zero if it's not a valid number
+        when Type::Number0 # coerce to a number or zero if it's not a valid number
           v = begin
                 value.as_s.to_i64
               rescue ArgumentError
