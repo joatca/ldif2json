@@ -17,8 +17,6 @@ module Ldif2json
     String
     Number
     NumberErr
-    Integer
-    IntegerErr
   end
 
   class NormalError < Exception
@@ -38,7 +36,7 @@ module Ldif2json
       @coercions = Hash(String, Type).new(Type::Auto) # default value is auto so we don't need to special case a missing type option
       
       OptionParser.new do |opts|
-        opts.banner = "Usage: #{PROGRAM_NAME} [options]\n\nValid TYPE values are:\nauto (coerce to integers if possible, otherwise floats, otherwise string)\nstring (always interpret as string)\nnumber (coerce to a floating-point number, 0.0 if invalid)\nnumber! (coerce to a floating-point number, error if any invalid)\ninteger (coerce to an integer, 0 if invalid)\ninteger! (coerce to an integer, error if any invalid)\n"
+        opts.banner = "Usage: #{PROGRAM_NAME} [options]\n\nValid TYPE values are:\nauto (coerce to integers if possible, otherwise floats, otherwise string)\nstring (always interpret as string)\nnumber (coerce to a number, 0 if invalid)\nnumber! (coerce to a number, error if any invalid)\n"
 
         opts.on("-f", "--flatten", "flatten each attribute to a single element if no records are multi-value") do |v|
           @mode = Mode::Flatten
@@ -61,10 +59,6 @@ module Ldif2json
                                    Type::Number
                                  when "number!"
                                    Type::NumberErr
-                                 when "integer"
-                                   Type::Integer
-                                 when "integer!"
-                                   Type::IntegerErr
                                  else
                                    raise NormalError.new("unrecognised coercion \"#{coercion}\"")
                                  end
@@ -80,31 +74,158 @@ module Ldif2json
 
     end
 
-    # return true if any pre-processing is required, that is, --join or --flatten is specified or any attribute type is *not* string
-    def preprocess(for_attribs : Set(String))
-      return true unless @mode == Mode::Normal
-      for_attribs.any? { |attrib| @coercions[attrib] != Type::String }
+    # return true if we should attempt to do any sort of int processing for this attribute
+    def do_coercion(attrib : String)
+      case @coercions[attrib]
+      when Type::Number, Type::NumberErr, Type::Auto
+        true
+      else
+        false
+      end
+    end
+
+  end
+
+  # an individual record, based on a hash but with extra functionality
+  class Record
+
+    @@can_be_coerced = Hash(String, Bool).new(true)
+    @@can_be_flattened = Hash(String, Bool).new(true)
+
+    def self.set_config(config : Conf)
+      @@config = config
+      @@can_be_coerced = Hash(String, Bool).new(config.mode != Mode::Join)
+      @@can_be_flattened = Hash(String, Bool).new(config.mode != Mode::Join)
+    end
+
+    def initialize
+      @original_values = Hash(String, JSON::Any).new { |h, k| h[k] = JSON::Any.new([] of JSON::Any) }
+      @coerced_values = Hash(String, JSON::Any).new { |h, k| h[k] = JSON::Any.new([] of JSON::Any) }
+    end
+
+    def config
+      # this feels dirty but we're fine if no mistakes are made ;-)
+      if @@config.nil?
+        raise RuntimeError.new("attempt to access config before set")
+      else
+        @@config.as(Conf)
+      end
+    end
+      
+    delegate size, to: @original_values
+    delegate has_key?, to: @original_values
+    delegate each_key, to: @original_values
+    delegate to_json, to: @original_values
+
+    # if an attribute is coercible then return the coerced values, otherwise return the base string values
+    def [](key : String)
+      if @@can_be_coerced[key]
+        #if key == "uidNumber"
+          #puts "#{key} #{@@can_be_coerced[key]}"
+        #end
+        @coerced_values[key]
+      else
+        @original_values[key]
+      end
     end
     
+    def []=(key : String, value : JSON::Any)
+
+      #puts "set #{key} to #{value}"
+
+      @original_values[key].as_a << value
+
+      if @@can_be_flattened[key]
+        if @original_values[key].as_a.size > 1
+          @@can_be_flattened[key] = false
+        end
+      end
+      
+      if config.do_coercion(key) && @@can_be_coerced[key]
+        case config.coercions[key]
+        when Type::Number # coerce to a number or zero if it's not a valid number
+          v = begin
+                value.as_s.to_i64
+              rescue ArgumentError
+                # OK, try a float
+                begin
+                  value.as_s.to_f64
+                rescue ArgumentError
+                  0_i64
+                end
+              end
+          @coerced_values[key].as_a << JSON::Any.new(v)
+        when Type::NumberErr
+          # coerce to a number and if not possible raise an exception
+          begin
+            v = begin
+                  value.as_s.to_i64
+                rescue ArgumentError
+                  # don't rescue this, let it propagate all the way up so we can return an error
+                  value.as_s.to_f64
+                end
+            @coerced_values[key].as_a << JSON::Any.new(v)
+          rescue ArgumentError
+            raise NormalError.new("value \"#{value}\" for attribute \"#{key}\" is not a valid number")
+          end
+        when Type::Auto
+          # coerce to a number and if not possible mark it as not coercible and do nothing else
+          begin
+            v = begin
+                  value.as_s.to_i64
+                rescue ArgumentError
+                  # don't rescue this, let it propagate up one
+                  value.as_s.to_f64
+                end
+            @coerced_values[key].as_a << JSON::Any.new(v)
+          rescue ArgumentError
+            #puts "cannot coerce #{key} because of value #{value}"
+            @@can_be_coerced[key] = false
+          end
+        end
+      end
+    end
+
+    def flatten
+      @original_values.each_key.select { |attrib| @@can_be_flattened[attrib] }.each do |attrib|
+        @original_values[attrib] = @original_values[attrib].as_a.first
+        @coerced_values[attrib] = @coerced_values[attrib].as_a.first if @@can_be_coerced[attrib]
+      end
+    end
+
+    def join(attrib : String)
+      @original_values[attrib] = JSON::Any.new(@original_values[attrib].as_a.map { |v| v.as_s }.join(config.join_string))
+    end
+
+    def dump(io : IO)
+      builder = JSON::Builder.new(io)
+      builder.start_document
+      builder.start_object
+      @original_values.keys.each do |attrib|
+        builder.field(attrib, self[attrib])
+      end
+      builder.end_object
+      builder.end_document
+      io << "\n"
+    end
+
   end
   
   class Records
 
-    @current : Hash(String, JSON::Any)
+    @current : Record
     
     def initialize
-      @records = Array(Hash(String, JSON::Any)).new
+      @records = Array(Record).new
       @current = new_record
       @attrib_names = Set(String).new
-      @has_multiple = Hash(String, Bool).new(false)
-      @only_numeric = Hash(String, Bool).new(true)
     end
 
     # this adds values from the "raw" LDIF so everything starts off being added as a String
     def add_value(key : String, value : String, encoded : Bool)
       #puts "add_value key #{key} value #{value} encoded #{encoded}"
       if key.size > 0
-        @current[key].as_a << JSON::Any.new(encoded ? Base64.decode_string(value) : value)
+        @current[key] = JSON::Any.new(encoded ? Base64.decode_string(value) : value)
         @attrib_names << key
       end
     end
@@ -120,98 +241,20 @@ module Ldif2json
 
     def new_record
       # all attributes start as multi-value and we may or may not flatten them later
-      Hash(String, JSON::Any).new { |h, k| h[k] = JSON::Any.new([] of JSON::Any) }
+      Record.new
     end
   
     def dump(config : Conf, io : IO)
-      if config.preprocess(@attrib_names)
-        if config.mode == Mode::Join # everything is treated as a string and joined
-          @records.each do |rec|
-            rec.each_key do |attrib|
-              rec[attrib] = JSON::Any.new(rec[attrib].as_a.map { |v| v.as_s }.join(config.join_string))
-            end
-          end
-        else
-          # either normal mode or flatten mode; in either case we coerce the types first; do each attribute first
-          @attrib_names.each do |attrib|
-            recs = @records.select { |rec| rec.has_key?(attrib) }
-            case config.coercions[attrib]
-            when Type::Number
-              # coerce to a float where non-numeric strings evaluate to 0.0
-              recs.each do |rec|
-                newrec = rec[attrib].as_a.map { |v|
-                  v = begin
-                        v.as_s.to_f
-                      rescue e : ArgumentError
-                        0.0 # allow random strings to eval to zero
-                      end
-                  JSON::Any.new(v)
-                }
-                rec[attrib] = JSON::Any.new(newrec)
-              end
-            when Type::NumberErr
-              begin
-                recs.each do |rec|
-                  rec[attrib] = JSON::Any.new(rec[attrib].as_a.map { |v| JSON::Any.new(v.as_s.to_f) })
-                end
-              rescue e : ArgumentError
-                raise NormalError.new("error coercing attribute #{attrib} to number: #{e.message}")
-              end
-            when Type::Integer
-              # coerce to a float where non-numeric strings evaluate to 0.0
-              recs.each do |rec|
-                newrec = rec[attrib].as_a.map { |v|
-                  v = begin
-                        v.as_s.to_i64
-                      rescue e : ArgumentError
-                        0_i64 # allow random strings to eval to zero
-                      end
-                  JSON::Any.new(v)
-                }
-                rec[attrib] = JSON::Any.new(newrec)
-              end
-            when Type::IntegerErr
-              recs.each do |rec|
-                begin
-                  rec[attrib] = JSON::Any.new(rec[attrib].as_a.map { |v| JSON::Any.new(v.as_s.to_i64) })
-                rescue e : ArgumentError
-                  raise NormalError.new("error coercing attribute #{attrib} to integer: #{e.message}")
-                end
-              end
-            when Type::String
-            # do nothing - it's already a string
-            when Type::Auto
-              # try to generate a new list with all-numeric attributes and replace the current ones with that; if
-              # that raises an exception then do nothing
-              begin
-                recs.each do |rec|
-                  rec[attrib] = JSON::Any.new(rec[attrib].as_a.map { |v| JSON::Any.new(v.as_s.to_i64) })
-                end
-              rescue e : ArgumentError
-                # that's fine, try floats                
-                begin
-                  recs.each do |rec|
-                    rec[attrib] = JSON::Any.new(rec[attrib].as_a.map { |v| JSON::Any.new(v.as_s.to_f) })
-                  end
-                rescue e : ArgumentError
-                  # that's fine
-                end
-              end
-            end
-            # now that all values have been coerced, check if we can flatten them if required
-            if config.mode == Mode::Flatten
-              unless recs.any? { |rec| rec[attrib].as_a.size > 1 }
-                recs.each do |rec|
-                  rec[attrib] = rec[attrib].as_a.first
-                end
-              end
-            end
-          end
-        end
-        # now we have all the records coerced, if necessary
-      end
       @records.each do |rec|
-        io.puts rec.to_json
+        case config.mode
+        when Mode::Join # everything is treated as a string and joined
+          rec.each_key do |attrib|
+            rec.join(attrib)
+          end
+        when Mode::Flatten
+          rec.flatten
+        end
+        rec.dump(io)
       end
     end
   
@@ -221,6 +264,7 @@ module Ldif2json
     
     config = Conf.new
     records = Records.new
+    Record.set_config(config)
 
     key, value = "", "" # current record, maybe not yet processed
     encoded = false # is the current record in encoded format?
