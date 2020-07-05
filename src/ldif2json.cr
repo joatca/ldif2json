@@ -24,44 +24,61 @@ module Ldif2json
 
   class Conf
 
-    property mode, join_string, coercions
+    property mode, join_string, coercions, can_be_coerced, can_be_flattened
     
     @mode : Mode
     @join_string : String
     @coercions : Hash(String, Type)
+    @can_be_coerced : Hash(String, Bool)
+    @can_be_flattened : Hash(String, Bool)
 
+    def new_boolhash(default : Bool)
+      Hash(String, Bool).new(default)
+    end
+    
     def initialize
       @mode = Mode::Normal
       @join_string = ":" # the default is not used at the moment
       @coercions = Hash(String, Type).new(Type::Auto) # default value is auto so we don't need to special case a missing type option
+      @can_be_coerced = new_boolhash(true)
+      @can_be_flattened = new_boolhash(false)
       
       OptionParser.new do |opts|
         opts.banner = "Usage: #{PROGRAM_NAME} [options]\n\nValid TYPE values are:\nauto (coerce to integers if possible, otherwise floats, otherwise string)\nstring (always interpret as string)\nnumber (coerce to a number, 0 if invalid)\nnumber! (coerce to a number, error if any invalid)\n"
 
         opts.on("-f", "--flatten", "flatten each attribute to a single element if no records are multi-value") do |v|
+          raise NormalError.new("cannot specify both flatten and join") unless @mode == Mode::Normal
           @mode = Mode::Flatten
+          @can_be_flattened = new_boolhash(true) # override the false default
         end
 
-        opts.on("-jSEP", "--join=SEP", "join multi-value attributes with SEP") do |v|
+        opts.on("-jSEP", "--join=SEP", "join multi-value attributes with SEP (--type ignored)") do |v|
+          raise NormalError.new("cannot specify both flatten and join") unless @mode == Mode::Normal
+          raise NormalError.new("join string should be a single character, not \"#{v}\"") if v.size > 1
           @mode = Mode::Join
           @join_string = v
+          # override the true defaults from above
+          @can_be_coerced = new_boolhash(false)
+          @can_be_flattened = new_boolhash(false)
         end
 
         opts.on("-t=ATTRIBUTE:TYPE", "--type=ATTRIBUTE:TYPE", "force ATTRIBUTE to always be coerced to TYPE, otherwise exit with error") do |v|
           if v =~ /^([\S:]+):([\S:]+)$/
             attrib, coercion = $1, $2
-            @coercions[attrib] = case coercion
-                                 when "auto"
-                                   Type::Auto
-                                 when "string"
-                                   Type::String
-                                 when "number"
-                                   Type::Number
-                                 when "number!"
-                                   Type::NumberErr
-                                 else
-                                   raise NormalError.new("unrecognised coercion \"#{coercion}\"")
-                                 end
+            puts "attrib #{attrib} coercion #{coercion}"
+            case coercion
+            when "auto"
+              # do nothing, default is Type::Auto
+            when "string"
+              @coercions[attrib] = Type::String
+              @can_be_coerced[attrib] = false # no point trying to coerce
+            when "number"
+              @coercions[attrib] = Type::Number
+            when "number!"
+              @coercions[attrib] = Type::NumberErr
+            else
+              raise NormalError.new("unrecognised coercion \"#{coercion}\"")
+            end
           end
         end
 
@@ -72,16 +89,11 @@ module Ldif2json
         
       end.parse
 
-    end
-
-    # return true if we should attempt to do any sort of int processing for this attribute
-    def do_coercion(attrib : String)
-      case @coercions[attrib]
-      when Type::Number, Type::NumberErr, Type::Auto
-        true
-      else
-        false
-      end
+      p @coercions
+      p @can_be_coerced
+      
+      raise NormalError.new("cannot set types in join mode") if @mode == Mode::Join && @coercions.size > 0
+      
     end
 
   end
@@ -89,13 +101,9 @@ module Ldif2json
   # an individual record, based on a hash but with extra functionality
   class Record
 
-    @@can_be_coerced = Hash(String, Bool).new(true)
-    @@can_be_flattened = Hash(String, Bool).new(true)
 
     def self.set_config(config : Conf)
       @@config = config
-      @@can_be_coerced = Hash(String, Bool).new(config.mode != Mode::Join)
-      @@can_be_flattened = Hash(String, Bool).new(config.mode != Mode::Join)
     end
 
     def initialize
@@ -119,9 +127,9 @@ module Ldif2json
 
     # if an attribute is coercible then return the coerced values, otherwise return the base string values
     def [](key : String)
-      if @@can_be_coerced[key]
+      if config.can_be_coerced[key]
         #if key == "uidNumber"
-          #puts "#{key} #{@@can_be_coerced[key]}"
+          #puts "#{key} #{config.can_be_coerced[key]}"
         #end
         @coerced_values[key]
       else
@@ -135,13 +143,13 @@ module Ldif2json
 
       @original_values[key].as_a << value
 
-      if @@can_be_flattened[key]
+      if config.can_be_flattened[key]
         if @original_values[key].as_a.size > 1
-          @@can_be_flattened[key] = false
+          config.can_be_flattened[key] = false
         end
       end
       
-      if config.do_coercion(key) && @@can_be_coerced[key]
+      if config.can_be_coerced[key]
         case config.coercions[key]
         when Type::Number # coerce to a number or zero if it's not a valid number
           v = begin
@@ -180,16 +188,16 @@ module Ldif2json
             @coerced_values[key].as_a << JSON::Any.new(v)
           rescue ArgumentError
             #puts "cannot coerce #{key} because of value #{value}"
-            @@can_be_coerced[key] = false
+            config.can_be_coerced[key] = false
           end
         end
       end
     end
 
     def flatten
-      @original_values.each_key.select { |attrib| @@can_be_flattened[attrib] }.each do |attrib|
+      @original_values.each_key.select { |attrib| config.can_be_flattened[attrib] }.each do |attrib|
         @original_values[attrib] = @original_values[attrib].as_a.first
-        @coerced_values[attrib] = @coerced_values[attrib].as_a.first if @@can_be_coerced[attrib]
+        @coerced_values[attrib] = @coerced_values[attrib].as_a.first if config.can_be_coerced[attrib]
       end
     end
 
