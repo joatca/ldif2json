@@ -65,7 +65,6 @@ module Ldif2json
         opts.on("-t=ATTRIBUTE:TYPE", "--type=ATTRIBUTE:TYPE", "force ATTRIBUTE to always be coerced to TYPE, otherwise exit with error") do |v|
           if v =~ /^([\S:]+):([\S:]+)$/
             attrib, coercion = $1, $2
-            puts "attrib #{attrib} coercion #{coercion}"
             case coercion
             when "auto"
               # do nothing, default is Type::Auto
@@ -89,9 +88,6 @@ module Ldif2json
         
       end.parse
 
-      p @coercions
-      p @can_be_coerced
-      
       raise NormalError.new("cannot set types in join mode") if @mode == Mode::Join && @coercions.size > 0
       
     end
