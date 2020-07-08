@@ -46,10 +46,16 @@ module Ldif2json
       OptionParser.new do |opts|
         opts.banner = "Usage: #{PROGRAM_NAME} [options]\n\nValid TYPE values are:\nauto (coerce to integers if possible, otherwise floats, otherwise string)\nstring (always interpret as string)\nnumber0 (coerce to a number, 0 if invalid)\nnumber (coerce to a number, error if any invalid)\n"
 
-        opts.on("-f", "--flatten", "flatten each attribute to a single element if no records are multi-value") do |v|
+        opts.on("-f [ATTRIBUTES]", "--flatten [ATTRIBUTES]", "flatten each given attribute to a single element if no records are multi-value or all attributes if ATTRIBUTES is missing") do |v|
           raise NormalError.new("cannot specify both flatten and join") unless @mode == Mode::Normal
           @mode = Mode::Flatten
-          @can_be_flattened = new_boolhash(true) # override the false default
+          if v.size == 0 # no argument passed
+            @can_be_flattened = new_boolhash(true) # override the false default
+          else
+            v.split(',').each do |attrib|
+              @can_be_flattened[attrib] = true
+            end
+          end
         end
 
         opts.on("-jSEP", "--join=SEP", "join multi-value attributes with SEP (--type ignored)") do |v|
