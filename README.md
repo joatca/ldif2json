@@ -4,26 +4,22 @@ Convert LDIF output from `ldapsearch` or `slapcat` to JSON suitable for easier p
 
 ## Installation
 
-[Install the Crystal compiler (and shards tool)](https://crystal-lang.org/install/) then run
+[Install the Crystal compiler (and shards tool)](https://crystal-lang.org/install/) and optionally [Pandoc](https://pandoc.org/) if you need to edit the manpage, then run
 
-    make install
+    make
+    sudo make install
 
 ## Usage
 
     ldapsearch [ options ] | ldif2json >data.json
-    
-### Options
 
-By default `ldif2json` returns all attributes as arrays, even if only one value is present, and sets the output type to `auto`, meaning that if all the values seeing for an attribute are numbers then they are output as numbers, otherwise as strings.
-* `--flatten` - if an attribute has only a single value (or is missing) for all records, output it as single values instead of as arrays
-* `--join=SEPARATOR` - join multi-value attributes with SEPARATOR and return a string (`,` is not recommended since it is a component of DNs)
-* `--type=attribute:type` - force the given attribute to have the given type. Valid types are:
-  * `auto` - use `number` if all values are numbers, otherwise `string`
-  * `string` - always return strings
-  * `number` - always return numbers; if a value is not a valid number, return `0.0`
-  * `number!` - always return numbers; if any value is not a number, exit with status 2
-  * `integer` - always return integers; if a value is not a valid integer, return `0`
-  * `integer!` - always return integers; if any value is not a integer, exit with status 2
+## Documentation
+
+See `doc/ldif2json.md`
+
+## Example
+
+ldapsearch [options] 'uid=*' | ldif2json --flatten | jq 'select(.cn | tostring | test("Smith$")) | .dn'
 
 ## Contributing
 
