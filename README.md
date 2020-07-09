@@ -19,7 +19,7 @@ See `doc/ldif2json.md`
 
 ## Example
 
-ldapsearch [options] 'uid=*' | ldif2json --flatten | jq 'select(.cn | tostring | test("Smith$")) | .dn'
+    ldapsearch [options] 'uid=*' | ldif2json --flatten | jq 'select(.cn | tostring | test("Smith$")) | .dn'
 
 ## Contributing
 
