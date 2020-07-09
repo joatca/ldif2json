@@ -15,8 +15,11 @@ DESCRIPTION
 ===========
 
 Reads LDAP Data Interchange Format (LDIF) from standard input or files passed as arguments and writes tabular
-JSON to standard output. One JSON object is written per line. By default if an attribute is a valid number for
-all input records, it is coerced to a number on output.
+JSON to standard output. One JSON object is written per line.
+
+LDIF does not contain schema information and thus `ldif2json` cannot know which attributes can be multi-valued or the types of each attribute. The default behaviour is to output the values of all attributes as JSON arrays even when only one value is present and to coerce each value to a number if and only if all values of that attribute are valid numbers. Otherwise values are strings.
+
+See the `--flatten` and `--type` options below to change this behaviour.
 
 Options
 -------
@@ -25,9 +28,10 @@ Options
 
 :   Prints brief usage information.
 
--f, --flatten
+-f, --flatten [ATTRIBUTE[,ATTRIBUTE...]]
 
-:   By default all attribute values are arrays of values, even if only one value is present. This option converts attributes to single values if all values across all records contain only a single value. Not compatible with --join
+:   For each ATTRIBUTE (or all attributes if none are given) if all values of each attribute have only a single
+    value then flatten them to a single value
 
 -jSEP, --join=SEP
 
