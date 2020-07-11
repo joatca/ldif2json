@@ -38,7 +38,6 @@ module Ldif2json
   # an individual record, based on a hash but with extra functionality
   class Record
 
-
     def self.set_config(config : Conf)
       @@config = config
     end
