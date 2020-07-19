@@ -85,7 +85,7 @@ module Ldif2json
             v = begin
                   value.as_s.to_i64
                 rescue ArgumentError
-                  # don't rescue this, let it propagate all the way up so we can return an error
+                  # don't rescue this, let it propagate up so we can return an error
                   value.as_s.to_f64
                 end
             @coerced_values[key].as_a << JSON::Any.new(v)
