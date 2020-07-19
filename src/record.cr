@@ -44,9 +44,6 @@ module Ldif2json
     # if an attribute is coercible then return the coerced values, otherwise return the base string values
     def [](key : String)
       if config.can_be_coerced[key]
-        #if key == "uidNumber"
-          #puts "#{key} #{config.can_be_coerced[key]}"
-        #end
         @coerced_values[key]
       else
         @original_values[key]
