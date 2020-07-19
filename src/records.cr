@@ -30,7 +30,6 @@ module Ldif2json
 
     # this adds values from the "raw" LDIF so everything starts off being added as a String
     def add_value(key : String, value : String, encoded : Bool)
-      #puts "add_value key #{key} value #{value} encoded #{encoded}"
       if key.size > 0
         @current[key] = JSON::Any.new(encoded ? Base64.decode_string(value) : value)
         @attrib_names << key
@@ -43,7 +42,6 @@ module Ldif2json
         @records << @current
         @current = new_record
       end
-      #puts "end_record keys #{@current.keys.inspect}"
     end
 
     def new_record
