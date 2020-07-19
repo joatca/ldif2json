@@ -41,7 +41,7 @@ module Ldif2json
 
     key, value = "", "" # current record, maybe not yet processed
     encoded = false # is the current record in encoded format?
-
+    
     ARGF.each_line do |line|
       case line.chomp
       when /^#/ # comment, do nothing
@@ -69,6 +69,7 @@ module Ldif2json
   rescue e : NormalError
 
     STDERR.puts "#{PROGRAM_NAME}: #{e.message}"
+    exit(1)
 
   end
 
